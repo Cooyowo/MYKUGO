@@ -336,7 +336,8 @@ async function refresh() {
   const state = await api('/api/state');
 
   if (!state.dbPath) {
-    $('key-info').textContent = '没有找到酷狗密钥库：请确认本机装过酷狗，且该歌曲已播放过一次。';
+    $('key-info').textContent =
+      '没有找到酷狗密钥库：请确认本机装过酷狗（密钥库在 %APPDATA%\\KuGou8\\KGMusicV3.db）。';
   } else {
     const loaded = state.keysLoadedAt
       ? new Date(state.keysLoadedAt).toLocaleTimeString('zh-CN', { hour12: false })
@@ -399,6 +400,20 @@ wireDir('input');
 wireDir('output');
 
 $('btn-scan').addEventListener('click', refresh);
+
+$('btn-quit').addEventListener('click', async () => {
+  if (!confirm('退出程序？（正在转换的任务会先跑完才会退出）')) return;
+  try {
+    const result = await api('/api/shutdown', {});
+    if (!result.ok) {
+      alert(result.error || '退出失败');
+      return;
+    }
+    showQuitScreen();
+  } catch (err) {
+    alert(err.message);
+  }
+});
 
 $('btn-reload-keys').addEventListener('click', async () => {
   try {
@@ -506,6 +521,28 @@ $('manual-path').addEventListener('keydown', async (event) => {
   await startConvert([value]);
 });
 
+/* ---------------- 退出 ---------------- */
+
+/** 服务已退出时的界面：把内容换掉，避免用户对着一个死页面操作。 */
+function showQuitScreen(reason) {
+  const main = document.querySelector('main');
+  if (main) {
+    main.textContent = '';
+    const panel = el('section', 'panel');
+    panel.appendChild(el('h2', '', '程序已退出'));
+    panel.appendChild(
+      el(
+        'p',
+        'muted',
+        reason ||
+          '本地服务已停止，这个页面不会再更新了。重新启动：双击项目里的快捷方式（或 bin\\ui.cmd）。',
+      ),
+    );
+    main.appendChild(panel);
+  }
+  $('key-info').textContent = '程序已退出。';
+}
+
 /* ---------------- 实时进度 ---------------- */
 
 const events = new EventSource('/api/events');
@@ -524,7 +561,8 @@ events.addEventListener('tasks', (event) => {
 });
 
 events.onerror = () => {
-  $('key-info').textContent = '与本地服务的连接已中断（服务窗口是不是被关掉了？）';
+  $('key-info').textContent =
+    '与本地服务的连接已中断（服务可能已退出，或窗口被关掉了）。重新启动：双击项目里的快捷方式。';
 };
 
 refresh().catch((err) => {

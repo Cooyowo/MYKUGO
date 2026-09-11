@@ -9,6 +9,7 @@
   "scripts": {
     "convert": "node src/cli.js",
     "probe": "node src/cli.js --probe",
-    "test": "node tests/config-ini.test.js && node tests/outputs-status.test.js && node tests/key-store-reload.test.js"
+    "test": "node tests/config-ini.test.js && node tests/outputs-status.test.js && node tests/key-store-reload.test.js",
+    "test:server": "node tests/server-autoexit.test.js"
   }
 }

@@ -27,6 +27,10 @@ const HOST = '127.0.0.1';
 const DEFAULT_PORT = 8787;
 const PORT_TRIES = 20;
 
+// 页面全部关闭后，等这么久还没有页面连回来就自动退出。
+// 60 秒足够覆盖"刷新页面"（刷新时的断连通常不到 2 秒），又不会让你等太久。
+const DEFAULT_AUTO_EXIT_SECONDS = 60;
+
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
@@ -48,13 +52,26 @@ const ALLOWED_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
 const pickedFiles = new Set();
 
 function parseArgs(argv) {
-  const opts = { port: DEFAULT_PORT, open: true };
+  const opts = {
+    port: DEFAULT_PORT,
+    open: true,
+    autoExit: true,
+    autoExitSeconds: DEFAULT_AUTO_EXIT_SECONDS,
+  };
+
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--port') opts.port = Number(argv[++i]);
     else if (arg === '--no-open') opts.open = false;
+    else if (arg === '--stay-alive') opts.autoExit = false;
+    else if (arg === '--auto-exit-seconds') opts.autoExitSeconds = Number(argv[++i]);
     else if (arg === '-h' || arg === '--help') opts.help = true;
   }
+
+  if (!Number.isFinite(opts.autoExitSeconds) || opts.autoExitSeconds < 1) {
+    opts.autoExitSeconds = DEFAULT_AUTO_EXIT_SECONDS;
+  }
+
   return opts;
 }
 
@@ -238,6 +255,47 @@ async function main() {
     getOutputDir: () => dirConfig.outputDir(),
   });
   const sseClients = new Set();
+
+  // ---- 页面全部关闭后自动退出 ----
+  //
+  // 判据是"还有没有页面连着 SSE"，而不是去监听网页的关闭事件：
+  // 刷新页面也会触发 beforeunload，靠它会导致一按 F5 服务就自杀。
+  // SSE 连接在后台标签页里也保持不断（不受浏览器定时器节流影响），所以判定很稳。
+  let autoExitTimer = null;
+  let sawAnyClient = false;
+
+  function cancelAutoExit() {
+    if (autoExitTimer) {
+      clearTimeout(autoExitTimer);
+      autoExitTimer = null;
+    }
+  }
+
+  function scheduleAutoExit() {
+    if (!opts.autoExit || autoExitTimer) return;
+    if (sseClients.size > 0) return;
+
+    autoExitTimer = setTimeout(() => {
+      autoExitTimer = null;
+      if (sseClients.size > 0) return; // 期间有页面连回来了
+
+      // 正在转换就先不退：转一半被杀掉是最糟的情况
+      const busy = runner
+        .snapshot()
+        .some((task) => task.status === 'pending' || task.status === 'running');
+      if (busy) {
+        console.log('  页面已关闭，但还有任务在跑，等它转完再退出…');
+        scheduleAutoExit();
+        return;
+      }
+
+      console.log(
+        `  页面已全部关闭且 ${Math.round(opts.autoExitSeconds)} 秒内没有连回来，服务自动退出。`,
+      );
+      shutdown('auto-exit');
+    }, opts.autoExitSeconds * 1000);
+    autoExitTimer.unref?.();
+  }
 
   runner.on('update', (tasks) => {
     const payload = `event: tasks\ndata: ${JSON.stringify({ tasks })}\n\n`;
@@ -488,6 +546,8 @@ async function main() {
         });
         res.write(`event: tasks\ndata: ${JSON.stringify({ tasks: runner.snapshot() })}\n\n`);
         sseClients.add(res);
+        sawAnyClient = true;
+        cancelAutoExit(); // 有页面连回来了
 
         const heartbeat = setInterval(() => {
           try {
@@ -500,7 +560,27 @@ async function main() {
         req.on('close', () => {
           clearInterval(heartbeat);
           sseClients.delete(res);
+          // 最后一个页面断开 → 开始倒计时；刷新时会在宽限期内重连上，所以不会误退
+          if (sseClients.size === 0 && sawAnyClient) scheduleAutoExit();
         });
+        return;
+      }
+
+      // ---- 页面里的「退出」按钮 ----
+      if (req.method === 'POST' && route === '/api/shutdown') {
+        const busy = runner
+          .snapshot()
+          .some((task) => task.status === 'pending' || task.status === 'running');
+        if (busy) {
+          sendJson(res, 409, {
+            ok: false,
+            error: '还有任务在转换中，等它转完再退出（或直接关掉服务窗口强制结束）',
+          });
+          return;
+        }
+
+        sendJson(res, 200, { ok: true });
+        setTimeout(() => shutdown('user-request'), 150);
         return;
       }
 
@@ -566,7 +646,15 @@ async function main() {
   console.log(`  输入目录：${dirConfig.inputDir()}${dirConfig.describe().inputIsDefault ? '（默认）' : ''}`);
   console.log(`  输出目录：${dirConfig.outputDir()}${dirConfig.describe().outputIsDefault ? '（默认）' : ''}`);
   console.log('');
-  console.log('  只监听本机回环地址，局域网/外网访问不到。按 Ctrl+C 或关闭本窗口即停止。');
+  console.log('  只监听本机回环地址，局域网/外网访问不到。');
+  if (opts.autoExit) {
+    console.log(
+      `  关掉所有页面 ${Math.round(opts.autoExitSeconds)} 秒后会自动退出（转换中的任务会先跑完）。`,
+    );
+    console.log('  想让它一直开着，用 --stay-alive 启动。');
+  } else {
+    console.log('  已启用 --stay-alive：页面关掉后服务继续运行，按 Ctrl+C 或关闭本窗口才停止。');
+  }
   console.log('');
 
   if (opts.open) {
@@ -577,13 +665,15 @@ async function main() {
     }
   }
 
-  const shutdown = () => {
+  function shutdown(reason) {
+    if (reason === 'user-request') console.log('  收到页面上的退出请求，正在退出…');
     keys.dispose();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 500).unref();
-  };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  }
+
+  process.on('SIGINT', () => shutdown('sigint'));
+  process.on('SIGTERM', () => shutdown('sigterm'));
 }
 
 main().catch((err) => {

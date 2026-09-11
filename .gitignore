@@ -18,3 +18,7 @@ KuGou8/
 # 上传内容的限定
 input/*
 !input/.gitkeep
+
+# 我的测试内容
+myTest/*
+!myTest/.gitkeep

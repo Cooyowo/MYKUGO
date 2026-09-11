@@ -28,9 +28,15 @@ function normalizeId(id) {
   return String(id).trim().toLowerCase();
 }
 
-const TEMP_DB_PATTERN = /^kugou-keys-(\d+)-[0-9a-f]+\.db$/;
+// 本工具在系统临时目录里留下的文件（进程被硬杀时会残留）
+const TEMP_FILE_PATTERNS = [
+  /^kugou-keys-(\d+)-[0-9a-f]+\.db$/, // 解密后的明文密钥库
+  /^kugou-fferr-(\d+)-[0-9a-f]+$/, // ffmpeg 的 stderr 暂存
+  /^kugou-ffprog-(\d+)-[0-9a-f]+$/, // ffmpeg 的进度暂存
+  /^kugou-ui-(?:out|err)-(\d+)\.log$/, // 启动器的日志
+];
 
-// 小于这个年龄的临时库先不清理，避免误删别的进程正在写的文件
+// 小于这个年龄的文件先不清理，避免误删别的进程正在写的文件
 const STALE_MIN_AGE_MS = 2 * 60 * 1000;
 
 /** 进程是否还活着（保留给排错用，清理逻辑已不再依赖它）。 */
@@ -47,17 +53,17 @@ function isPidAlive(pid) {
  * 清理"孤儿"明文密钥库。
  *
  * 为什么需要：进程被硬杀（任务管理器结束进程、强杀信号）时 JS 的清理代码不会执行，
- * 49MB 的明文密钥库就留在临时目录里了。
+ * 明文密钥库（几十 MB，含下载记录与 EnKey）、ffmpeg 暂存、启动器日志都会留在临时目录。
  *
  * 判据不用"猜 PID 是否还活着"——那有 PID 复用的漏洞（进程死了、号被别的进程拿走，
  * 文件就永远清不掉）。这里用两个更可靠的信号：
- *   1. 太新的文件先放过（可能是别的进程刚开始解密、还没打开）；
+ *   1. 太新的文件先放过（可能是别的进程刚开始写、还没打开）；
  *   2. 之后**直接尝试删除**：Windows 上被打开的文件会拒绝删除，
  *      所以删失败 = 有活进程还在用（保留），删成功 = 确认是垃圾（清掉）。
  *
  * @returns {{removed:number, kept:number}}
  */
-function sweepStaleTempDatabases() {
+function sweepStaleTempFiles() {
   const dir = os.tmpdir();
   let names = [];
   try {
@@ -70,9 +76,16 @@ function sweepStaleTempDatabases() {
   let kept = 0;
 
   for (const name of names) {
-    const matched = TEMP_DB_PATTERN.exec(name);
-    if (!matched) continue;
-    if (Number(matched[1]) === process.pid) continue; // 自己的，不动
+    let pid = null;
+    for (const pattern of TEMP_FILE_PATTERNS) {
+      const matched = pattern.exec(name);
+      if (matched) {
+        pid = Number(matched[1]);
+        break;
+      }
+    }
+    if (pid === null) continue;
+    if (pid === process.pid) continue; // 自己的，不动
 
     const filePath = path.join(dir, name);
 
@@ -168,7 +181,7 @@ function loadFromDatabase(dbPath) {
   }
 
   // 先清掉上次被硬杀（进程被强杀，JS 清理代码没机会执行）留下的明文密钥库
-  sweepStaleTempDatabases();
+  sweepStaleTempFiles();
 
   const tempPath = path.join(
     os.tmpdir(),
@@ -368,7 +381,7 @@ module.exports = {
   createDatabaseKeyStore,
   dbFingerprint,
   normalizeId,
-  sweepStaleTempDatabases,
+  sweepStaleTempFiles,
   isPidAlive,
   DOWNLOAD_ITEM_QUERY,
 };

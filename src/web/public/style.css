@@ -80,6 +80,16 @@ button.primary {
 
 button.primary:hover { background: #3d7ce8; }
 
+button.danger {
+  color: #ffb4ae;
+  border-color: #6b2a26;
+}
+
+button.danger:hover {
+  background: #3a2020;
+  border-color: var(--err);
+}
+
 input[type="text"] {
   flex: 1;
   min-width: 240px;

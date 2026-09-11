@@ -97,7 +97,7 @@ function createRunner({ provider, getOutputDir }) {
         : '';
       throw new Error(
         `密钥库里没有这首歌的密钥（keyId=${info.header.keyId}）。\n` +
-          '  请先在酷狗里播放一次该歌曲，并确认是在本机下载的。' +
+          '  密钥是下载时写入的，不需要先播放。请确认这个 .kgg 是在本机、本账号下载且下载完整的。' +
           extra,
       );
     }

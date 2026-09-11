@@ -65,6 +65,19 @@ value = seed * 0x9ef4 − floor(seed / 0xce26) * 0x7fffff07
 | `SongName` / `Artist` / `Album` | 用于写 ID3 标签 |
 | `BitRate` / `EncryptionType` | 元信息 |
 
+**密钥是下载时写入的，不需要先播放这首歌。** 实测（2026-09-11，酷狗 PC 版）：
+
+- 本机 8 个 `.kgg` **全部**在库里有对应记录且 `EnKey` 非空，每一首都是下载完就能转换；
+- 其中一首是刚下载、从未播放过的，同样一次成功；
+- `DownloadItem` 共 326 行，只有 9 行有 `EnKey`，且全部属于 `EncryptionType=2`（加密下载）。
+  普通 MP3/FLAC 下载（`EncryptionType=0/1`）本来就没有加密，也就没有 `EnKey`；
+- `StartTime` / `CompleteTime` / `AccessTime` 这些时间字段在库里是空值或无效值，**不能**用来判断"密钥何时写入"。
+
+> ⚠️ 网上（包括 kgg-dec 的 README）常见"必须至少播放一次才能解密"的排错提示。
+> 在本项目的实测环境里**不成立**：密钥随下载响应一起落库。
+> 那条提示可能来自 Android 端或缓存试听等其它场景。
+> 找不到密钥时，真实原因更可能是"不是在本机下载的"或"下载没完成"。
+
 ### 2.3 EnKey 解包
 
 1. Base64 解码。

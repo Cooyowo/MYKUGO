@@ -132,7 +132,7 @@ function main() {
   }
 
   if (!sample) {
-    console.log('  跳过：找不到"密钥库里有密钥"的 .kgg 样本（可能都还没播放过）');
+    console.log('  跳过：找不到"密钥库里有密钥"的 .kgg 样本（可能不是在当前设备下载的）');
     return;
   }
 
@@ -202,20 +202,29 @@ function main() {
     fs.rmSync(workDir, { recursive: true, force: true });
   }
 
-  // ── 孤儿明文密钥库的清理 ──
-  console.log('\n【孤儿明文密钥库清理】');
+  // ── 临时文件清理 ──
+  console.log('\n【临时文件清理（硬杀后残留的孤儿）】');
   {
     const { DatabaseSync } = require('node:sqlite');
     const tempDir = os.tmpdir();
     const oldFile = path.join(tempDir, `kugou-keys-999901-${'a'.repeat(12)}.db`);
     const freshFile = path.join(tempDir, `kugou-keys-999902-${'b'.repeat(12)}.db`);
     const heldFile = path.join(tempDir, `kugou-keys-999903-${'c'.repeat(12)}.db`);
+    // 除了密钥库，ffmpeg 暂存和启动器日志也会在硬杀时残留，同样要清理
+    const ffmpegTemp = path.join(tempDir, `kugou-ffprog-999904-${'d'.repeat(10)}`);
+    const uiLog = path.join(tempDir, 'kugou-ui-out-999905.log');
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
 
     fs.writeFileSync(oldFile, 'x');
     fs.utimesSync(oldFile, tenMinutesAgo, tenMinutesAgo);
 
     fs.writeFileSync(freshFile, 'x'); // mtime 就是现在
+
+    fs.writeFileSync(ffmpegTemp, 'x');
+    fs.utimesSync(ffmpegTemp, tenMinutesAgo, tenMinutesAgo);
+
+    fs.writeFileSync(uiLog, 'x');
+    fs.utimesSync(uiLog, tenMinutesAgo, tenMinutesAgo);
 
     // 模拟"还有活进程在用"：必须用 sqlite 打开，不能只用 fs.openSync。
     // Node 的 fs.openSync 是允许共享删除的（照样删得掉），而 sqlite 打开数据库时
@@ -228,10 +237,12 @@ function main() {
       fs.utimesSync(heldFile, tenMinutesAgo, tenMinutesAgo);
       holder = new DatabaseSync(heldFile, { readOnly: true });
 
-      const result = keymap.sweepStaleTempDatabases();
+      const result = keymap.sweepStaleTempFiles();
       check('旧的孤儿被清掉', fs.existsSync(oldFile) === false, `removed=${result.removed}`);
       check('刚创建的不动（避免误删正在写的）', fs.existsSync(freshFile) === true, `kept=${result.kept}`);
       check('被 sqlite 占用的不会被误删', fs.existsSync(heldFile) === true);
+      check('ffmpeg 暂存也会被清理', fs.existsSync(ffmpegTemp) === false);
+      check('启动器日志也会被清理', fs.existsSync(uiLog) === false);
     } finally {
       if (holder) {
         try {
@@ -240,7 +251,7 @@ function main() {
           /* 忽略 */
         }
       }
-      for (const f of [oldFile, freshFile, heldFile]) fs.rmSync(f, { force: true });
+      for (const f of [oldFile, freshFile, heldFile, ffmpegTemp, uiLog]) fs.rmSync(f, { force: true });
     }
   }
 
