@@ -1,0 +1,6 @@
+# 目录设置文件（由程序生成）
+# 里面记录的是本机路径，不参与版本管理
+config/settings.ini
+
+# 旧版配置（已迁移到 config/settings.ini）
+.ui-config.json

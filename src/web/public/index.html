@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>某 .kgg 转换工具</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1>某 .kgg 转换工具</h1>
+    <div id="key-info" class="muted">正在连接本地服务…</div>
+  </header>
+
+  <main>
+    <section class="panel">
+      <div class="dirblock">
+        <div class="dirrow">
+          <span class="dirlabel">输入目录<small>.kgg 从这里找</small></span>
+          <code id="input-dir" class="dirpath">—</code>
+          <span id="input-dir-tag" class="tag"></span>
+          <span class="dirbuttons">
+            <button id="btn-edit-input" type="button">修改…</button>
+            <button id="btn-reset-input" type="button">恢复默认</button>
+          </span>
+        </div>
+        <div class="diredit" id="edit-input" hidden>
+          <input type="text" id="input-dir-input" placeholder="直接粘贴目录路径后回车，例如 D:\KuGou\KugouMusic">
+          <button id="btn-browse-input" type="button">浏览…</button>
+          <button id="btn-ok-input" type="button" class="primary">确定</button>
+          <button id="btn-cancel-input" type="button">取消</button>
+          <div class="dirhint" id="hint-input"></div>
+        </div>
+      </div>
+
+      <div class="dirblock">
+        <div class="dirrow">
+          <span class="dirlabel">输出目录<small>产物存到这里</small></span>
+          <code id="output-dir" class="dirpath">—</code>
+          <span id="output-dir-tag" class="tag"></span>
+          <span class="dirbuttons">
+            <button id="btn-edit-output" type="button">修改…</button>
+            <button id="btn-reset-output" type="button">恢复默认</button>
+          </span>
+        </div>
+        <div class="diredit" id="edit-output" hidden>
+          <input type="text" id="output-dir-input" placeholder="直接粘贴目录路径后回车，例如 D:\Music\output">
+          <button id="btn-browse-output" type="button">浏览…</button>
+          <button id="btn-ok-output" type="button" class="primary">确定</button>
+          <button id="btn-cancel-output" type="button">取消</button>
+          <div class="dirhint" id="hint-output"></div>
+        </div>
+      </div>
+
+      <div class="dirblock">
+        <div class="dirrow">
+          <span class="dirlabel">设置文件<small>可用记事本直接编辑</small></span>
+          <code id="settings-path" class="dirpath">—</code>
+          <span id="settings-tag" class="tag"></span>
+          <span class="dirbuttons">
+            <button id="btn-open-config" type="button">打开配置文件</button>
+            <button id="btn-reload-config" type="button">重新读取配置</button>
+          </span>
+        </div>
+        <div class="dirhint" id="settings-hint"></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="row">
+        <button id="btn-scan" type="button">重新扫描</button>
+        <button id="btn-pick" type="button">选择单个文件…</button>
+        <button id="btn-reload-keys" type="button">重新加载密钥库</button>
+      </div>
+      <div class="row">
+        <label><input type="checkbox" id="opt-mp3" checked> 转成 MP3</label>
+        <label>码率
+          <select id="opt-bitrate">
+            <option value="320k" selected>320k</option>
+            <option value="256k">256k</option>
+            <option value="192k">192k</option>
+          </select>
+        </label>
+        <label><input type="checkbox" id="opt-overwrite"> 覆盖已转换的</label>
+        <label><input type="checkbox" id="opt-deep"> 深度解码校验（较慢）</label>
+      </div>
+      <div class="row">
+        <input type="text" id="manual-path" placeholder="也可以直接粘贴 .kgg 文件路径，然后点回车">
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="row space-between">
+        <strong>待转换文件 <span id="file-count" class="muted"></span></strong>
+        <span>
+          <button id="btn-select-new" type="button">只选未完成的</button>
+          <button id="btn-all" type="button">全选</button>
+          <button id="btn-none" type="button">全不选</button>
+          <button id="btn-convert" type="button" class="primary">开始转换</button>
+        </span>
+      </div>
+      <ul id="file-list" class="list"></ul>
+    </section>
+
+    <section class="panel">
+      <div class="row space-between">
+        <strong>任务</strong>
+        <button id="btn-clear" type="button">清空已完成</button>
+      </div>
+      <ul id="task-list" class="list"></ul>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

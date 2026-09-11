@@ -1,0 +1,20 @@
+# 依赖（本项目零依赖，保留以防将来）
+node_modules/
+
+# 输出产物，保留的是output/.gitkeep
+output/*
+!output/.gitkeep
+
+# 中间文件
+*.part
+.cache/
+
+# 密钥材料：绝对不要入库
+*.key
+kgg.key
+*.db
+KuGou8/
+
+# 上传内容的限定
+input/*
+!input/.gitkeep
