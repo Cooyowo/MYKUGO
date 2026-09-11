@@ -1,11 +1,12 @@
 'use strict';
 
 /**
- * 建立「keyId(EnHash) → 音频密钥」的映射。
+ * 建立「keyId → 音频密钥」的映射。
  *
- * 两种来源：
- *   1) 本机酷狗密钥库 KGMusicV3.db 的 DownloadItem 表（主路径）
- *   2) kgg.key 文本文件，每行 "keyId$EnKey"（备用，便于跨设备迁移与排错）
+ * 三个来源：
+ *   1) 密钥库 KGMusicV3.db 的 DownloadItem 表（常规下载）
+ *   2) 同一库的 ShareFileItems 表（另一条下载通道，只记在这里）
+ *   3) kgg.key 文本文件，每行 "keyId$EnKey"（备用，便于跨设备迁移与排错）
  *
  * 隐私约定：解密后的明文密钥库只写在系统临时目录，dispose() 时删除。
  */
@@ -23,6 +24,38 @@ const DOWNLOAD_ITEM_QUERY = `
   FROM DownloadItem
   WHERE EnKey IS NOT NULL AND TRIM(EnKey) <> ''
 `;
+
+/**
+ * 密钥的第二个来源：ShareFileItems。
+ *
+ * 酷狗的加密歌曲密钥不只记在 DownloadItem 里 —— 有一部分（实测是走另一条下载通道
+ * 得到的那些，"光年之外 (Live)"就是）只记在这张表的 EncryptionKey 列，keyId 是 EncryptionKeyId。
+ * 两处格式完全一样（EncryptionVersion=5、704 字符 Base64、同一套解包算法）。
+ *
+ * 实测本机：DownloadItem 10 条、ShareFileItems 10 条，9 条重叠、各有一条独有 ——
+ * 只读 DownloadItem 就会漏掉那一条，表现正是"密钥库里没有这首歌的密钥"。
+ */
+const SHARE_FILE_ITEMS_QUERY = `
+  SELECT EncryptionKeyId, EncryptionKey, MD5, FileSize, BitRate, Quality,
+         EncryptionVersion, FileName
+  FROM ShareFileItems
+  WHERE EncryptionKey IS NOT NULL AND TRIM(EncryptionKey) <> ''
+    AND EncryptionKeyId IS NOT NULL AND TRIM(EncryptionKeyId) <> ''
+`;
+
+/** 从本地文件路径猜歌手/歌名（ShareFileItems 没存这两个字段）。 */
+function tagsFromFileName(fileName) {
+  if (!fileName) return {};
+  try {
+    const base = path.parse(String(fileName)).name;
+    const matched = base.match(/^(.+?)\s+-\s+(.+)$/);
+    return matched
+      ? { artist: matched[1].trim(), songName: matched[2].trim() }
+      : { songName: base };
+  } catch {
+    return {};
+  }
+}
 
 function normalizeId(id) {
   return String(id).trim().toLowerCase();
@@ -232,9 +265,10 @@ function loadFromDatabase(dbPath) {
       state.db = new DatabaseSync(tempPath);
     }
 
-    const rows = state.db.prepare(DOWNLOAD_ITEM_QUERY).all();
+    // ---- 来源 1：DownloadItem（常规下载）----
+    const downloadRows = state.db.prepare(DOWNLOAD_ITEM_QUERY).all();
 
-    for (const row of rows) {
+    for (const row of downloadRows) {
       const id = normalizeId(row.EnHash);
       if (!id) continue;
       map.set(id, {
@@ -248,6 +282,39 @@ function loadFromDatabase(dbPath) {
         album: row.Album ? String(row.Album) : null,
         destFileName: row.DestFileName ? String(row.DestFileName) : null,
         encryptionType: row.EncryptionType,
+        keySource: '下载记录',
+      });
+    }
+
+    // ---- 来源 2：ShareFileItems（另一条下载通道，只记在这里）----
+    // 只在 DownloadItem 没给出同一个 keyId 时补充，这样前者的歌名/歌手/专辑元数据优先。
+    let shareRows = [];
+    try {
+      shareRows = state.db.prepare(SHARE_FILE_ITEMS_QUERY).all();
+    } catch {
+      // 老版本密钥库可能没有这张表，缺了不影响主流程
+      shareRows = [];
+    }
+
+    for (const row of shareRows) {
+      const id = normalizeId(row.EncryptionKeyId);
+      if (!id || map.has(id)) continue;
+
+      const tags = tagsFromFileName(row.FileName);
+      map.set(id, {
+        enKey: String(row.EncryptionKey),
+        md5: row.MD5 ? String(row.MD5).toLowerCase() : null,
+        size: typeof row.FileSize === 'number' ? row.FileSize : null,
+        bitrate: typeof row.BitRate === 'number' && row.BitRate > 0 ? row.BitRate : null,
+        duration: null,
+        songName: tags.songName || null,
+        artist: tags.artist || null,
+        album: null,
+        destFileName: row.FileName ? String(row.FileName) : null,
+        encryptionType: null,
+        encryptionVersion: row.EncryptionVersion,
+        quality: row.Quality ? String(row.Quality) : null,
+        keySource: '共享文件记录',
       });
     }
   } catch (err) {
@@ -380,8 +447,10 @@ module.exports = {
   loadFromDatabase,
   createDatabaseKeyStore,
   dbFingerprint,
+  tagsFromFileName,
   normalizeId,
   sweepStaleTempFiles,
   isPidAlive,
   DOWNLOAD_ITEM_QUERY,
+  SHARE_FILE_ITEMS_QUERY,
 };

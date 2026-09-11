@@ -302,6 +302,7 @@ function renderTasks(tasks) {
 
     if (task.decrypted) {
       const parts = [`原始音频：${task.decrypted.format}`];
+      if (task.keySource) parts.push(`密钥来自${task.keySource}`);
       if (task.decrypted.skipped) parts.push('（原始音频已存在，跳过解密）');
       for (const note of task.decrypted.notes || []) parts.push(note);
       item.appendChild(el('div', 'detail', parts.join(' · ')));
@@ -436,9 +437,12 @@ $('btn-open-config').addEventListener('click', async () => {
       alert(`打不开资源管理器：${result.error}\n文件位置：${dirs.settingsPath}`);
       return;
     }
-    if (result.recreated) {
-      alert('设置文件之前被删掉了，已重新生成一份并帮你定位到它。');
+    const notes = [];
+    if (result.recreated) notes.push('设置文件之前被删掉了，已重新生成一份。');
+    if (result.foreground === false) {
+      notes.push('已在资源管理器里打开，但没能自动跳到最前面，请点一下任务栏里那个文件夹窗口。');
     }
+    if (notes.length) alert(notes.join('\n'));
     await refresh();
   } catch (err) {
     alert(err.message);

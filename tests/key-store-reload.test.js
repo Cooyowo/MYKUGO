@@ -153,7 +153,12 @@ function main() {
 
     const { DatabaseSync } = require('node:sqlite');
     const db = new DatabaseSync(plainB);
+    // 两张表都要清空：工具现在会同时读 DownloadItem 和 ShareFileItems，
+    // 只清前者的话"没有密钥"的前提就不成立，后面几项断言会假通过/假失败。
     db.exec("UPDATE DownloadItem SET EnKey = '' WHERE EnKey IS NOT NULL AND TRIM(EnKey) <> ''");
+    db.exec(
+      "UPDATE ShareFileItems SET EncryptionKey = '' WHERE EncryptionKey IS NOT NULL AND TRIM(EncryptionKey) <> ''",
+    );
     db.close();
 
     // 3. 重新加密（加密 → 解密的往返必须完全一致，否则说明我们对格式的理解有偏差）
@@ -252,6 +257,81 @@ function main() {
         }
       }
       for (const f of [oldFile, freshFile, heldFile, ffmpegTemp, uiLog]) fs.rmSync(f, { force: true });
+    }
+  }
+
+  // ── 密钥的两个来源都要读到 ──
+  //
+  // 酷狗的加密歌曲密钥记在两个地方：DownloadItem.EnKey（常规下载）和
+  // ShareFileItems.EncryptionKey（另一条下载通道）。只读前者会漏掉一部分歌，
+  // 表现就是"密钥库里没有这首歌的密钥"（真实案例：华晨宇、G.E.M. 邓紫棋 - 光年之外 (Live)）。
+  console.log('\n【密钥来源覆盖（DownloadItem + ShareFileItems）】');
+  {
+    const srcDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kugou-keysrc-'));
+    const plainPath = path.join(srcDir, 'plain.db');
+    let store = null;
+
+    try {
+      dbCipher.decryptDatabaseToFile(dbPath, plainPath);
+      const { DatabaseSync } = require('node:sqlite');
+      const db = new DatabaseSync(plainPath, { readOnly: true });
+
+      const inDownload = new Set(
+        db
+          .prepare(`SELECT lower(EnHash) AS k FROM DownloadItem WHERE EnKey IS NOT NULL AND TRIM(EnKey) <> ''`)
+          .all()
+          .map((r) => r.k),
+      );
+      const inShare = new Set(
+        db
+          .prepare(
+            `SELECT lower(EncryptionKeyId) AS k FROM ShareFileItems
+             WHERE EncryptionKey IS NOT NULL AND TRIM(EncryptionKey) <> ''
+               AND EncryptionKeyId IS NOT NULL AND TRIM(EncryptionKeyId) <> ''`,
+          )
+          .all()
+          .map((r) => r.k),
+      );
+      const union = new Set([...inDownload, ...inShare]);
+      db.close();
+
+      console.log(
+        `  · DownloadItem ${inDownload.size} 条，ShareFileItems ${inShare.size} 条，去重后 ${union.size} 条`,
+      );
+
+      store = keymap.loadFromDatabase(dbPath);
+
+      const missing = [...union].filter((k) => !store.provider.find(k));
+      check(
+        '两张表里的每个 keyId 都能查到',
+        missing.length === 0,
+        missing.length > 0 ? `缺 ${missing.length} 个` : `共 ${union.size} 个`,
+      );
+
+      const shareOnly = [...inShare].filter((k) => !inDownload.has(k));
+      if (shareOnly.length > 0) {
+        const hit = store.provider.find(shareOnly[0]);
+        check(
+          '只记在 ShareFileItems 里的密钥也能命中',
+          hit !== null && typeof hit.enKey === 'string',
+          `keyId=${shareOnly[0].slice(0, 12)} 来源=${hit ? hit.keySource : '无'}`,
+        );
+        check('并且标注了密钥来源', Boolean(hit && hit.keySource), hit ? hit.keySource : '');
+      } else {
+        console.log('  · 本机没有"只记在 ShareFileItems"的密钥，跳过该项');
+      }
+    } finally {
+      if (store) store.dispose();
+      // Windows 上句柄释放有一点延迟，删不掉就重试几次（不该算测试失败）
+      for (let i = 0; i < 5; i++) {
+        try {
+          fs.rmSync(srcDir, { recursive: true, force: true });
+          break;
+        } catch {
+          // 同步阻塞等待（这个测试是同步流程）
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);
+        }
+      }
     }
   }
 

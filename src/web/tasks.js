@@ -91,6 +91,7 @@ function createRunner({ provider, getOutputDir }) {
 
     const info = inspect(task.input);
     const record = provider.find(info.header.keyId);
+    task.keySource = record ? record.keySource || null : null;
     if (!record) {
       const extra = provider.lastError
         ? `\n  另外，重新加载密钥库时也失败了：${provider.lastError}\n  如果酷狗正在运行，可以退出酷狗后点"重新加载密钥库"再试。`

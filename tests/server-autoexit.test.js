@@ -209,11 +209,14 @@ async function main() {
   //
   // 注意：单首歌转码只要 2~3 秒（实测 4 分钟的歌转 320k 约 2.7 秒），
   // 所以必须让队列里有多首歌，才能保证宽限期到期时任务确实还在跑。
-  // 转换目标目录用临时目录，避免动用户 output\ 里已有的产物。
+  //
+  // ⚠ 不能去改 config\settings.ini 里的输出目录 —— 那是用户的持久配置，
+  //   测试改完忘恢复就会把用户的设置改坏（这个坑踩过一次）。
+  //   改用 --output-dir 命令行覆盖：只影响这次进程，不落盘。
   console.log('\n【5】还有任务在转换时，不能退出');
   {
     const tempOut = fs.mkdtempSync(path.join(os.tmpdir(), 'autoexit-out-'));
-    const server = startServer([], 1); // 宽限期压到 1 秒
+    const server = startServer(['--output-dir', tempOut], 1); // 宽限期压到 1 秒
     try {
       let up = false;
       for (let i = 0; i < 30 && !up; i++) {
@@ -224,15 +227,13 @@ async function main() {
 
       const state = await (await fetch(`${BASE}/api/state`)).json();
       check('有可用的 .kgg 样本', state.files.length > 0, `${state.files.length} 个`);
+      check(
+        '输出目录用的是命令行覆盖，没动设置文件',
+        state.dirs.outputDir === tempOut && state.dirs.outputOverridden === true,
+        state.dirs.outputDir,
+      );
 
       if (state.files.length > 0) {
-        // 把输出目录换到临时目录：这样每首歌都是"未转换"，会被真正跑一遍
-        await fetch(`${BASE}/api/dirs`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ outputDir: tempOut }),
-        });
-
         const sse = await connectSse();
         const conv = await fetch(`${BASE}/api/convert`, {
           method: 'POST',

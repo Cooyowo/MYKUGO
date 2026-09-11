@@ -349,9 +349,18 @@ function createDirConfig() {
   let state = resolveFromDisk();
   let loadedFingerprint = fingerprint(SETTINGS_PATH);
 
+  // 命令行临时覆盖：只影响本次运行，**不写进设置文件**。
+  // （给测试和"临时用别的目录跑一次"用，避免把用户的持久配置改掉。）
+  let override = {};
+
   const api = {
     settingsPath: SETTINGS_PATH,
     configDir: CONFIG_DIR,
+
+    /** 临时覆盖目录（不落盘）。传 null 可清除。 */
+    setOverride(dirs) {
+      override = dirs && typeof dirs === 'object' ? { ...dirs } : {};
+    },
 
     /** 启动时调用：文件不存在就生成一份，并尝试迁移旧配置。 */
     ensureFile() {
@@ -373,10 +382,10 @@ function createDirConfig() {
     },
 
     inputDir() {
-      return state.resolvedValues[KEY_INPUT].value;
+      return override.inputDir || state.resolvedValues[KEY_INPUT].value;
     },
     outputDir() {
-      return state.resolvedValues[KEY_OUTPUT].value;
+      return override.outputDir || state.resolvedValues[KEY_OUTPUT].value;
     },
 
     /** 磁盘上的文件是否已被改动（只做一次 stat，很便宜）。 */
@@ -399,13 +408,18 @@ function createDirConfig() {
     describe() {
       const input = state.resolvedValues[KEY_INPUT];
       const output = state.resolvedValues[KEY_OUTPUT];
+      const inputOverridden = Boolean(override.inputDir);
+      const outputOverridden = Boolean(override.outputDir);
+
       return {
-        inputDir: input.value,
-        outputDir: output.value,
+        inputDir: api.inputDir(),
+        outputDir: api.outputDir(),
         defaultInputDir: DEFAULT_INPUT_DIR,
         defaultOutputDir: DEFAULT_OUTPUT_DIR,
-        inputIsDefault: input.usedDefault,
-        outputIsDefault: output.usedDefault,
+        inputIsDefault: !inputOverridden && input.usedDefault,
+        outputIsDefault: !outputOverridden && output.usedDefault,
+        inputOverridden,
+        outputOverridden,
         settingsPath: SETTINGS_PATH,
         settingsDir: CONFIG_DIR,
         settingsExists: state.exists,

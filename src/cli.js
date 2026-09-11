@@ -167,6 +167,7 @@ function printInspection(info, record, provider) {
 
   if (record) {
     console.log(`  密钥命中    : 是${record.songName ? `（${record.songName}）` : ''}`);
+    if (record.keySource) console.log(`  密钥来源    : ${record.keySource}`);
     if (record.size) console.log(`  预期明文长  : ${record.size} 字节`);
   } else {
     console.log(

@@ -57,6 +57,8 @@ function parseArgs(argv) {
     open: true,
     autoExit: true,
     autoExitSeconds: DEFAULT_AUTO_EXIT_SECONDS,
+    inputDir: null,
+    outputDir: null,
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -65,6 +67,8 @@ function parseArgs(argv) {
     else if (arg === '--no-open') opts.open = false;
     else if (arg === '--stay-alive') opts.autoExit = false;
     else if (arg === '--auto-exit-seconds') opts.autoExitSeconds = Number(argv[++i]);
+    else if (arg === '--input-dir') opts.inputDir = argv[++i];
+    else if (arg === '--output-dir') opts.outputDir = argv[++i];
     else if (arg === '-h' || arg === '--help') opts.help = true;
   }
 
@@ -178,6 +182,7 @@ function scanKggFiles() {
 }
 
 const PICK_DIALOG_SCRIPT = path.join(__dirname, 'pick-dialog.ps1');
+const REVEAL_SCRIPT = path.join(__dirname, 'reveal-file.ps1');
 
 /**
  * 弹出 Windows 原生选择框（脚本见 pick-dialog.ps1）。
@@ -248,6 +253,11 @@ async function main() {
 
   // 设置文件（config\settings.ini）：不存在就生成一份，值留空 = 用内置默认路径
   const ensuredSettings = dirConfig.ensureFile();
+
+  // 临时覆盖（只影响本次运行，不写进设置文件）
+  if (opts.inputDir || opts.outputDir) {
+    dirConfig.setOverride({ inputDir: opts.inputDir, outputDir: opts.outputDir });
+  }
 
   // 输出目录可能在运行中被用户改掉，所以传一个取值函数而不是固定路径
   const runner = createRunner({
@@ -407,7 +417,6 @@ async function main() {
         // 文件被删了就先补一份，保证打开时一定看得到
         const ensured = dirConfig.ensureFile();
 
-        // explorer.exe 用 /select 打开时即使成功也常返回非 0，所以不看退出码。
         // 参数拼法见 config.buildRevealArgs 的说明（自己加内层引号会让它打开"文档"）。
         const args = buildRevealArgs(dirConfig.settingsPath);
 
@@ -423,20 +432,44 @@ async function main() {
           return;
         }
 
-        try {
-          spawn('explorer.exe', args, {
-            stdio: 'ignore',
-            detached: true,
-            windowsHide: false,
-          }).unref();
+        // 不能只 spawn explorer：Windows 有前台风锁，后台进程开的窗口只会闪在任务栏里
+        // （用户点了按钮却看不到任何反应）。交给脚本打开后再显式把窗口激活到前台。
+        const revealed = runCapture('powershell.exe', [
+          '-NoProfile',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-File',
+          REVEAL_SCRIPT,
+          '-Path',
+          dirConfig.settingsPath,
+        ]);
+
+        if (revealed.error) {
           sendJson(res, 200, {
-            ok: true,
+            ok: false,
+            error: `无法启动资源管理器：${revealed.error.message}`,
+            settingsPath: dirConfig.settingsPath,
+          });
+          return;
+        }
+
+        const matched = /RESULT ok=(\d) hwnd=(\d+) foreground=(\d+)/.exec(revealed.stdout || '');
+        if (!matched || matched[1] !== '1') {
+          sendJson(res, 200, {
+            ok: false,
+            error: (revealed.stderr || '').trim() || '没找到打开的资源管理器窗口',
             settingsPath: dirConfig.settingsPath,
             recreated: ensured.created,
           });
-        } catch (err) {
-          sendJson(res, 200, { ok: false, error: err.message });
+          return;
         }
+
+        sendJson(res, 200, {
+          ok: true,
+          settingsPath: dirConfig.settingsPath,
+          recreated: ensured.created,
+          foreground: matched[3] === '1',
+        });
         return;
       }
 
